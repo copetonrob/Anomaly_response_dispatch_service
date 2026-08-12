@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#101416" />
+    <meta name="color-scheme" content="dark" />
+    <title>Аномальная диспетчерская</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <main class="game" id="game" aria-live="polite">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Смена <span id="turn-number">1</span></p>
+            <h1>Диспетчерская</h1>
+          </div>
+          <button class="icon-button" id="restart-button" type="button" aria-label="Начать новую смену">↻</button>
+        </header>
+
+        <section class="resources" id="resources" aria-label="Ресурсы"></section>
+
+        <section class="desk" aria-label="Текущая ситуация">
+          <div class="choice-hint choice-hint--left" id="left-hint" aria-hidden="true"></div>
+          <div class="choice-hint choice-hint--right" id="right-hint" aria-hidden="true"></div>
+
+          <article class="card" id="card" tabindex="0" aria-describedby="card-text">
+            <div class="card__image" id="card-image" role="img" aria-label=""></div>
+            <div class="card__body">
+              <p class="card__speaker" id="card-speaker"></p>
+              <h2 class="card__title" id="card-title"></h2>
+              <p class="card__text" id="card-text"></p>
+            </div>
+          </article>
+        </section>
+
+        <section class="result-overlay" id="result-overlay" hidden>
+          <div class="result-panel">
+            <p class="eyebrow" id="result-kicker"></p>
+            <h2 id="result-title"></h2>
+            <p id="result-text"></p>
+            <button class="primary-button" id="new-run-button" type="button">Новая смена</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="src/content.js?v=3"></script>
+    <script src="src/game.js?v=3"></script>
+  </body>
+</html>
