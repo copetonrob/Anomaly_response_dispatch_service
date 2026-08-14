@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/content.js && node --check src/game.js && node scripts/validate-content.mjs"
+    "check": "node --check src/content/registry.js && node --check src/content/events.js && node --check src/content/events/field-and-crisis.js && node --check src/content/events/resource-lessons.js && node --check src/content/distortions.js && node --check src/content/chains/glass-signal.js && node --check src/content/stories/last-shift.js && node --check src/content.js && node --check src/game.js && node --check scripts/analyze-balance.mjs && node scripts/validate-content.mjs",
+    "balance": "node scripts/analyze-balance.mjs"
   }
 }

@@ -47,6 +47,7 @@
       aftermath: null,
       pendingOutcome: null,
       authoredOutcome: null,
+      exhaustionStoryStarted: false,
       ended: null
     };
   }
@@ -105,14 +106,10 @@
     return conditions.every(testCondition);
   }
 
-  function isEligible(card, options = {}) {
+  function isEligible(card) {
     if (!card || !conditionsPass(card.conditions)) return false;
     const plays = state.playCounts[card.id] || 0;
-    if (Number.isFinite(card.maxPlays) && plays >= card.maxPlays) return false;
-    if (options.ignoreCooldown) return true;
-    const turnsSince = state.turn - (state.lastPlayed[card.id] ?? -999);
-    if (plays > 0 && turnsSince <= (card.cooldown ?? content.config.recentWindow)) return false;
-    return !state.history.slice(-content.config.recentWindow).includes(card.id);
+    return plays === 0;
   }
 
   function cardWeight(card) {
@@ -143,7 +140,7 @@
     while (state.queue.length) {
       const queuedId = state.queue.shift();
       const queued = cardById.get(queuedId);
-      if (isEligible(queued, { ignoreCooldown: true })) return queued;
+      if (isEligible(queued)) return queued;
       console.warn(`Queued card '${queuedId}' is missing or no longer eligible`);
     }
     return null;
@@ -153,21 +150,22 @@
     const queued = takeQueuedCard();
     if (queued) return queued;
 
-    let candidates = content.cards
+    const candidates = content.cards
       .filter((card) => card.weight > 0 && isEligible(card))
       .map((card) => ({ card, weight: cardWeight(card) }))
       .filter((entry) => entry.weight > 0);
 
-    // A tiny content set can temporarily exhaust all cooldowns. Relax only
-    // recency, never story conditions or maxPlays, so the run cannot deadlock.
-    if (!candidates.length) {
-      candidates = content.cards
-        .filter((card) => card.weight > 0 && isEligible(card, { ignoreCooldown: true }))
-        .map((card) => ({ card, weight: cardWeight(card) }))
-        .filter((entry) => entry.weight > 0);
+    const picked = weightedPick(candidates);
+    if (picked) return picked;
+
+    if (!state.exhaustionStoryStarted && content.config.exhaustionStoryCard) {
+      state.exhaustionStoryStarted = true;
+      const finale = cardById.get(content.config.exhaustionStoryCard);
+      if (isEligible(finale)) return finale;
+      console.warn(`Exhaustion story card '${content.config.exhaustionStoryCard}' is unavailable`);
     }
 
-    return weightedPick(candidates);
+    return null;
   }
 
   function applyEffect(effect) {
@@ -283,10 +281,10 @@
   function showNextCard() {
     currentCard = state.currentCardId ? cardById.get(state.currentCardId) : selectNextCard();
     if (!currentCard) {
-      state.ended = {
+      state.ended = content.config.exhaustionEnding || {
         kind: "ending",
-        title: "Тишина в эфире",
-        text: "Подходящих вызовов больше нет. Добавьте новые карты или ослабьте их условия."
+        title: "Смена пережита",
+        text: "Доступные вызовы закончились. Вы дожили до утра."
       };
       saveState();
       renderResult(state.ended);
@@ -351,7 +349,9 @@
     if (!direction || !currentCard || state.phase === "aftermath") return;
 
     const impacts = new Map();
-    for (const effect of currentCard.choices[direction].effects || []) {
+    const choice = currentCard.choices[direction];
+    const forecast = choice.forecastEffects || choice.effects || [];
+    for (const effect of forecast) {
       if (effect.type !== "resource" || !effect.amount) continue;
       impacts.set(effect.key, (impacts.get(effect.key) || 0) + Math.abs(effect.amount));
     }

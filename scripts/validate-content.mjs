@@ -1,16 +1,16 @@
 import { resolve, dirname } from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { loadGameContent } from "./lib/load-content.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-globalThis.window = {};
-await import(pathToFileURL(resolve(root, "src/content.js")).href);
-
-const content = globalThis.window.GAME_CONTENT;
+const content = await loadGameContent(root);
 const errors = [];
 const resourceIds = new Set(Object.keys(content?.resources || {}));
+const baseResourceIds = new Set(["personnel", "budget", "secrecy"]);
 const cards = content?.cards || [];
 const ids = new Set();
+const categoryIds = new Set(Object.keys(content?.categories || {}));
 
 function error(message) {
   errors.push(message);
@@ -38,6 +38,12 @@ function validateEffect(effect, owner) {
   if (effect.type === "resource" && (!Number.isFinite(effect.amount) || Math.abs(effect.amount) > 1)) {
     error(`${owner}: resource effect amount must be within -1..1`);
   }
+  if (effect.type === "enqueue" && (!Array.isArray(effect.cards) || !effect.cards.length)) {
+    error(`${owner}: enqueue effect needs at least one card id`);
+  }
+  if (effect.type === "end" && (!effect.title || !effect.text)) {
+    error(`${owner}: end effect needs title and text`);
+  }
 }
 
 if (!content) error("GAME_CONTENT was not created");
@@ -49,6 +55,16 @@ for (const card of cards) {
   else ids.add(card.id);
 
   if (!card.title || !card.text) error(`${card.id}: title and text are required`);
+  if (!categoryIds.has(card.category)) error(`${card.id}: unknown category '${card.category}'`);
+  if (card.lessonResource && !baseResourceIds.has(card.lessonResource)) {
+    error(`${card.id}: unknown lesson resource '${card.lessonResource}'`);
+  }
+  if (card.lessonResource && card.category !== "events") {
+    error(`${card.id}: resource lesson must be an event`);
+  }
+  if (["chains", "stories"].includes(card.category) && !card.arc) {
+    error(`${card.id}: ${card.category} card needs an arc id`);
+  }
   if (card.image && !existsSync(resolve(root, card.image))) {
     error(`${card.id}: image '${card.image}' does not exist`);
   }
@@ -59,6 +75,13 @@ for (const card of cards) {
     if (!choice?.label) error(`${card.id}: missing ${direction} choice label`);
     if (choice?.preview) error(`${card.id}: obsolete preview field; impact is derived from effects`);
     for (const effect of choice?.effects || []) validateEffect(effect, `${card.id}.${direction}`);
+    for (const effect of choice?.forecastEffects || []) {
+      validateEffect(effect, `${card.id}.${direction}.forecast`);
+      if (effect.type !== "resource") error(`${card.id}.${direction}: forecastEffects may contain only resources`);
+    }
+    if (card.category === "distortions" && !choice?.forecastEffects?.length) {
+      error(`${card.id}.${direction}: distortion choice needs forecastEffects`);
+    }
 
     const result = card.results?.[direction];
     if (!result?.title || !result?.text) {
@@ -78,6 +101,9 @@ for (const card of cards) {
 
 const references = [];
 for (const id of content?.config?.start?.queue || []) references.push(["start queue", id]);
+if (content?.config?.exhaustionStoryCard) {
+  references.push(["exhaustion story", content.config.exhaustionStoryCard]);
+}
 for (const card of cards) {
   for (const direction of ["left", "right"]) {
     const effects = [
@@ -94,6 +120,46 @@ for (const card of cards) {
 }
 for (const [owner, id] of references) {
   if (!ids.has(id)) error(`${owner}: queued card '${id}' does not exist`);
+}
+
+const groupedCards = Object.values(content?.cardGroups || {}).flat();
+if (groupedCards.length !== cards.length) {
+  error(`Aggregated pool has ${cards.length} cards, but category files contain ${groupedCards.length}`);
+}
+for (const category of categoryIds) {
+  const group = content?.cardGroups?.[category];
+  if (!Array.isArray(group)) {
+    error(`Category '${category}' has no registered card array`);
+    continue;
+  }
+  const expected = content?.catalogCounts?.[category];
+  if (!Number.isInteger(expected)) {
+    error(`Category '${category}' has no catalog count`);
+  } else if (group.length !== expected) {
+    error(`Category '${category}' expected ${expected} cards, got ${group.length}`);
+  }
+}
+
+for (const [resource, expected] of Object.entries(content?.resourceLessonCounts || {})) {
+  const lessons = cards.filter((card) => card.lessonResource === resource);
+  if (lessons.length !== expected) {
+    error(`Resource lesson '${resource}' expected ${expected} cards, got ${lessons.length}`);
+  }
+  for (const card of lessons) {
+    const choices = Object.values(card.choices || {});
+    const hasStrongGain = choices.some((choice) =>
+      (choice.effects || []).some((effect) =>
+        effect.type === "resource" && effect.key === resource && effect.amount >= 0.14
+      )
+    );
+    const hasAlternativeGain = choices.some((choice) =>
+      (choice.effects || []).some((effect) =>
+        effect.type === "resource" && effect.key !== resource && effect.amount > 0
+      )
+    );
+    if (!hasStrongGain) error(`${card.id}: lesson needs a strong gain for '${resource}'`);
+    if (!hasAlternativeGain) error(`${card.id}: lesson needs an alternative gain outside '${resource}'`);
+  }
 }
 
 for (const rule of content?.tagRules || []) {
@@ -122,5 +188,8 @@ if (errors.length) {
   for (const item of errors) console.error(`- ${item}`);
   process.exitCode = 1;
 } else {
-  console.log(`Content valid: ${cards.length} cards, ${references.length} queue references`);
+  const distribution = Object.entries(content.cardGroups)
+    .map(([category, group]) => `${category}=${group.length}`)
+    .join(", ");
+  console.log(`Content valid: ${cards.length} cards (${distribution}), ${references.length} queue references`);
 }
